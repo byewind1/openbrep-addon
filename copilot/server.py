@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 OBR_ROOT = Path("/Users/ren/MAC工作/工作/code/开源项目/gdl-agent")
+OBR_CONFIG_PATH = OBR_ROOT / "config.toml"
 if str(OBR_ROOT) not in sys.path:
     sys.path.insert(0, str(OBR_ROOT))
 
@@ -70,6 +71,9 @@ def _build_messages(req: ChatRequest) -> list[dict[str, str]]:
 
 def _create_llm_adapter() -> LLMAdapter:
     config_path = os.environ.get("GDL_AGENT_CONFIG")
+    if config_path is None:
+        config_path = str(OBR_CONFIG_PATH)
+
     cfg = GDLAgentConfig.load(config_path)
     return LLMAdapter(cfg.llm)
 
