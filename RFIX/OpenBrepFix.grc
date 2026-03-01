@@ -19,3 +19,11 @@
 /* [   ] */		"OpenBrep"
 /* [  1] */			"GDL Copilot"
 }
+
+'GDLG' 32510 Palette | leftCaption | close | grow  0  0  400  600  "GDL Copilot" {
+/* [  1] */ Browser  0  0  400  600
+}
+
+'DLGH' 32510 Copilot_Palette {
+1    ""    CopilotBrowser
+}
