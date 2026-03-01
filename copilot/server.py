@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -17,6 +18,13 @@ from openbrep.config import GDLAgentConfig
 from openbrep.llm import LLMAdapter
 
 app = FastAPI(title="GDL Copilot", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 SYSTEM_PROMPT = """你是 Archicad GDL 脚本 AI 修复助手。
 用户会粘贴编译报错或出问题的代码片段。
