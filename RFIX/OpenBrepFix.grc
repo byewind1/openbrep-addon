@@ -13,4 +13,5 @@
 'STR#' 32500 "Strings for the Menu" {
 /* [   ] */		"OpenBrep"
 /* [  1] */			"启动 OpenBrep"
+/* [  2] */			"GDL Copilot"
 }

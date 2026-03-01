@@ -1,32 +1,35 @@
 #include "OpenBrepCommands.hpp"
 #include "AddOnVersion.hpp"
 
+#include <chrono>
 #include <cstdlib>
-#include <string>
+#include <thread>
 
 namespace {
 
 static void LaunchOpenBrepInBrowser ()
 {
-	const std::string url = "http://localhost:8501";
-#if defined (macintosh)
-	const std::string command = "open " + url;
-#elif defined (WINDOWS)
-	const std::string command = "start " + url;
-#else
-	const std::string command = "xdg-open " + url;
-#endif
-	std::system (command.c_str ());
+	std::system ("open http://localhost:8501");
+}
+
+static void LaunchGdlCopilot ()
+{
+	std::system ("cd ~/MAC工作/工作/code/开源项目/openbrep-addon && python -m uvicorn copilot.server:app --port 8502 &");
+	std::this_thread::sleep_for (std::chrono::milliseconds (1500));
+	std::system ("open http://localhost:8502");
 }
 
 } // namespace
 
 GSErrCode OpenBrepMenuCommandHandler (const API_MenuParams* menuParams)
 {
-	if (menuParams->menuItemRef.menuResID == OpenBrepMenuResId &&
-		menuParams->menuItemRef.itemIndex == OpenBrepMenuItemIndex)
-	{
+	if (menuParams->menuItemRef.menuResID != OpenBrepMenuResId)
+		return NoError;
+
+	if (menuParams->menuItemRef.itemIndex == OpenBrepMenuItemLaunchOpenBrepIndex) {
 		LaunchOpenBrepInBrowser ();
+	} else if (menuParams->menuItemRef.itemIndex == OpenBrepMenuItemGdlCopilotIndex) {
+		LaunchGdlCopilot ();
 	}
 
 	return NoError;
