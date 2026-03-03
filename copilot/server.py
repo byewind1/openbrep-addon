@@ -8,6 +8,12 @@ import threading
 import time
 from pathlib import Path
 
+try:
+    from AppKit import NSPasteboard, NSStringPboardType
+except Exception:
+    NSPasteboard = None  # type: ignore[assignment]
+    NSStringPboardType = None  # type: ignore[assignment]
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -40,26 +46,56 @@ SYSTEM_PROMPT = """你是 Archicad GDL 脚本 AI 修复助手。
 
 clipboard_lock = threading.Lock()
 clipboard_buffer: list[str] = []
-clipboard_last_raw = ""
+clipboard_last_signature = ""
+clipboard_last_nonempty = ""
 
 
-def _read_clipboard_text() -> str:
+def _read_clipboard_text_pbpaste() -> str:
     try:
         return subprocess.check_output(["pbpaste"], text=True, timeout=1).strip()
     except Exception:
         return ""
 
 
+def _read_clipboard_text_appkit() -> str:
+    if NSPasteboard is None:
+        return ""
+
+    try:
+        pb = NSPasteboard.generalPasteboard()
+        text = pb.stringForType_(NSStringPboardType)
+        return str(text).strip() if text else ""
+    except Exception:
+        return ""
+
+
+def _read_clipboard_snapshot() -> tuple[str, str]:
+    appkit_text = _read_clipboard_text_appkit()
+    shell_text = _read_clipboard_text_pbpaste()
+
+    if appkit_text:
+        text = appkit_text
+        source = "appkit"
+    else:
+        text = shell_text
+        source = "pbpaste"
+
+    return text, source
+
+
 def _clipboard_watch_loop() -> None:
-    global clipboard_last_raw
+    global clipboard_last_signature, clipboard_last_nonempty
 
     while True:
-        value = _read_clipboard_text()
-        if value and value != clipboard_last_raw:
-            clipboard_last_raw = value
-            with clipboard_lock:
-                if value not in clipboard_buffer:
-                    clipboard_buffer.append(value)
+        value, source = _read_clipboard_snapshot()
+        if value:
+            signature = f"{source}:{value}"
+            if signature != clipboard_last_signature:
+                clipboard_last_signature = signature
+                if value != clipboard_last_nonempty:
+                    clipboard_last_nonempty = value
+                    with clipboard_lock:
+                        clipboard_buffer.append(value)
         time.sleep(0.8)
 
 
@@ -148,11 +184,14 @@ def get_clipboard_buffer() -> ClipboardBufferResponse:
 
 @app.post("/clipboard-buffer/clear", response_model=ClipboardBufferResponse)
 def clear_clipboard_buffer(req: ClipboardBufferUpdateRequest | None = None) -> ClipboardBufferResponse:
+    global clipboard_last_nonempty
+
     items = req.items if req is not None else []
     normalized = [item.strip() for item in items if item and item.strip()]
     with clipboard_lock:
         clipboard_buffer.clear()
         clipboard_buffer.extend(normalized)
+        clipboard_last_nonempty = normalized[-1] if normalized else ""
         return ClipboardBufferResponse(items=list(clipboard_buffer))
 
 
