@@ -41,11 +41,15 @@ class HistoryMessage(BaseModel):
     content: str
 
 
+class ImageItem(BaseModel):
+    b64: str = Field(..., min_length=1)
+    mime: str | None = None
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     history: list[HistoryMessage] = Field(default_factory=list)
-    image_b64: str | None = None
-    image_mime: str | None = None
+    images: list[ImageItem] | None = None
 
 
 class ChatResponse(BaseModel):
@@ -58,8 +62,8 @@ def _extract_gdl_code_blocks(text: str) -> list[str]:
     return [m.group(1).strip() for m in pattern.finditer(text)]
 
 
-def _build_messages(req: ChatRequest) -> list[dict[str, str]]:
-    messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+def _build_messages(req: ChatRequest) -> list[dict[str, object]]:
+    messages: list[dict[str, object]] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
     for item in req.history:
         role = item.role if item.role in {"user", "assistant"} else "user"
@@ -67,7 +71,19 @@ def _build_messages(req: ChatRequest) -> list[dict[str, str]]:
         if content:
             messages.append({"role": role, "content": content})
 
-    messages.append({"role": "user", "content": req.message.strip()})
+    valid_images = [img for img in (req.images or []) if img.b64.strip()]
+    if valid_images:
+        user_content: list[dict[str, str | dict[str, str]]] = []
+        for img in valid_images:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{img.mime or 'image/png'};base64,{img.b64.strip()}"},
+            })
+        user_content.append({"type": "text", "text": req.message.strip()})
+        messages.append({"role": "user", "content": user_content})
+    else:
+        messages.append({"role": "user", "content": req.message.strip()})
+
     return messages
 
 
@@ -90,25 +106,7 @@ def index() -> HTMLResponse:
 def chat(req: ChatRequest) -> ChatResponse:
     llm = _create_llm_adapter()
     messages = _build_messages(req)
-
-    has_image = bool(req.image_b64 and req.image_b64.strip())
-    if has_image:
-        flattened_parts: list[str] = []
-        for msg in messages[1:]:
-            role = msg.get("role", "user")
-            content = (msg.get("content") or "").strip()
-            if content:
-                flattened_parts.append(f"[{role}]\n{content}")
-
-        image_prompt = "\n\n".join(flattened_parts)
-        resp = llm.generate_with_image(
-            text_prompt=image_prompt,
-            image_b64=req.image_b64.strip(),
-            image_mime=(req.image_mime or "image/png"),
-            system_prompt=messages[0]["content"],
-        )
-    else:
-        resp = llm.generate(messages)
+    resp = llm.generate(messages)
 
     reply = (resp.content or "").strip()
     code_blocks = _extract_gdl_code_blocks(reply)

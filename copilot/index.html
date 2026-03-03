@@ -113,12 +113,20 @@
       background: var(--bg);
       color: var(--text);
     }
-    .msg-image {
-      max-width: 100%;
-      max-height: 160px;
-      border-radius: 8px;
-      display: block;
+    .msg-images {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
       margin-bottom: 6px;
+    }
+    .msg-image {
+      width: 84px;
+      height: 84px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0b1220;
+      flex-shrink: 0;
     }
 
     .code {
@@ -224,9 +232,6 @@
     }
 
     .image-box {
-      display: flex;
-      align-items: center;
-      gap: 10px;
       border: 1px solid var(--border);
       border-radius: 10px;
       background: var(--panel);
@@ -235,37 +240,42 @@
     .image-box.hidden {
       display: none;
     }
-    .image-preview {
-      width: 52px;
-      height: 52px;
+    .image-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .image-thumb {
+      position: relative;
+      width: 56px;
+      height: 56px;
+      flex-shrink: 0;
+    }
+    .image-thumb img {
+      width: 100%;
+      height: 100%;
       object-fit: cover;
       border-radius: 8px;
       border: 1px solid var(--border);
       background: #0b1220;
-      flex-shrink: 0;
+      display: block;
     }
-    .image-name {
-      flex: 1;
-      min-width: 0;
-      color: var(--muted);
-      font-size: 12px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .image-remove {
+    .image-thumb button {
+      position: absolute;
+      top: -6px;
+      right: -6px;
+      width: 18px;
+      height: 18px;
       border: 1px solid var(--border);
-      background: transparent;
+      background: #0b1220;
       color: var(--muted);
-      border-radius: 8px;
-      width: 28px;
-      height: 28px;
+      border-radius: 999px;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 11px;
       line-height: 1;
-      flex-shrink: 0;
+      padding: 0;
     }
-    .image-remove:hover {
+    .image-thumb button:hover {
       color: var(--danger);
       border-color: var(--danger);
     }
@@ -319,9 +329,7 @@
 
     <footer class="composer">
       <div id="imageBox" class="image-box hidden">
-        <img id="imagePreview" class="image-preview" alt="预览" />
-        <span id="imageName" class="image-name"></span>
-        <button id="imageRemove" class="image-remove" title="移除图片">✕</button>
+        <div id="imageList" class="image-list"></div>
       </div>
       <div class="input-row">
         <textarea id="input" placeholder="粘贴报错信息、代码片段，或直接粘贴截图..."></textarea>
@@ -330,7 +338,7 @@
           <button id="send" class="send-btn">发送</button>
         </div>
       </div>
-      <input id="imageInput" type="file" accept="image/*" hidden />
+      <input id="imageInput" type="file" accept="image/*" multiple hidden />
       <div class="hint">
         <span>Enter 发送，Shift+Enter 换行，Cmd+V 可粘贴截图</span>
         <span id="status"></span>
@@ -349,15 +357,12 @@
     const attachEl = document.getElementById('attach');
     const imageInputEl = document.getElementById('imageInput');
     const imageBoxEl = document.getElementById('imageBox');
-    const imagePreviewEl = document.getElementById('imagePreview');
-    const imageNameEl = document.getElementById('imageName');
-    const imageRemoveEl = document.getElementById('imageRemove');
+    const imageListEl = document.getElementById('imageList');
 
     const history = [];
     let sending = false;
-    let attachedImageB64 = null;
-    let attachedImageMime = null;
-    let attachedImageName = null;
+    const maxImages = 3;
+    const currentImages = [];
 
     function escapeHtml(str) {
       return str
@@ -411,7 +416,7 @@
       return btn;
     }
 
-    function appendMessage(role, text, imageDataUrl = null) {
+    function appendMessage(role, text, imageDataUrls = []) {
       const wrap = document.createElement('div');
       wrap.className = `msg-wrap ${role}`;
 
@@ -437,12 +442,17 @@
           }
         }
       } else {
-        if (imageDataUrl) {
-          const img = document.createElement('img');
-          img.className = 'msg-image';
-          img.src = imageDataUrl;
-          img.alt = '用户上传图片';
-          msg.appendChild(img);
+        if (Array.isArray(imageDataUrls) && imageDataUrls.length > 0) {
+          const imagesWrap = document.createElement('div');
+          imagesWrap.className = 'msg-images';
+          for (const url of imageDataUrls) {
+            const img = document.createElement('img');
+            img.className = 'msg-image';
+            img.src = url;
+            img.alt = '用户上传图片';
+            imagesWrap.appendChild(img);
+          }
+          msg.appendChild(imagesWrap);
         }
         if (text) {
           const textNode = document.createElement('div');
@@ -460,7 +470,6 @@
       sending = on;
       sendEl.disabled = on;
       attachEl.disabled = on;
-      imageRemoveEl.disabled = on;
       inputEl.disabled = on;
       if (on) {
         statusEl.innerHTML = '<span class="loading"><span class="dot"></span><span class="dot"></span><span class="dot"></span>发送中</span>';
@@ -470,22 +479,40 @@
     }
 
     function updateImagePreview() {
-      if (!attachedImageB64) {
+      imageListEl.innerHTML = '';
+      if (currentImages.length === 0) {
         imageBoxEl.classList.add('hidden');
-        imagePreviewEl.removeAttribute('src');
-        imageNameEl.textContent = '';
         return;
       }
 
-      imagePreviewEl.src = `data:${attachedImageMime || 'image/png'};base64,${attachedImageB64}`;
-      imageNameEl.textContent = attachedImageName || '截图';
+      for (let i = 0; i < currentImages.length; i += 1) {
+        const item = currentImages[i];
+        const thumb = document.createElement('div');
+        thumb.className = 'image-thumb';
+
+        const img = document.createElement('img');
+        img.src = item.dataUrl;
+        img.alt = item.name || `图片${i + 1}`;
+        thumb.appendChild(img);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.title = '移除图片';
+        removeBtn.textContent = '✕';
+        removeBtn.addEventListener('click', () => {
+          currentImages.splice(i, 1);
+          updateImagePreview();
+        });
+        thumb.appendChild(removeBtn);
+
+        imageListEl.appendChild(thumb);
+      }
+
       imageBoxEl.classList.remove('hidden');
     }
 
-    function clearAttachedImage() {
-      attachedImageB64 = null;
-      attachedImageMime = null;
-      attachedImageName = null;
+    function clearAttachedImages() {
+      currentImages.length = 0;
       imageInputEl.value = '';
       updateImagePreview();
     }
@@ -503,29 +530,56 @@
       });
     }
 
-    async function setAttachedImageFromFile(file, fallbackName = '截图') {
-      if (!file || !file.type || !file.type.startsWith('image/')) return;
-      attachedImageB64 = await fileToBase64(file);
-      attachedImageMime = file.type || 'image/png';
-      attachedImageName = file.name || fallbackName;
+    async function addImageFile(file, fallbackName = '截图') {
+      if (!file || !file.type || !file.type.startsWith('image/')) return false;
+      if (currentImages.length >= maxImages) return false;
+
+      const b64 = await fileToBase64(file);
+      const mime = file.type || 'image/png';
+      const dataUrl = `data:${mime};base64,${b64}`;
+
+      currentImages.push({
+        dataUrl,
+        b64,
+        mime,
+        name: file.name || fallbackName
+      });
       updateImagePreview();
+      return true;
+    }
+
+    async function addImageFiles(files, fallbackName = '图片') {
+      if (!files || files.length === 0) return;
+      const slotsLeft = Math.max(0, maxImages - currentImages.length);
+      if (slotsLeft === 0) {
+        errorEl.textContent = '最多只能附加 3 张图片。';
+        return;
+      }
+
+      let candidates = Array.from(files).filter((f) => f && f.type && f.type.startsWith('image/'));
+      if (candidates.length > slotsLeft) {
+        candidates = candidates.slice(0, slotsLeft);
+        errorEl.textContent = '最多发送 3 张图片，已自动截断。';
+      }
+
+      for (const file of candidates) {
+        await addImageFile(file, fallbackName);
+      }
     }
 
     async function sendMessage() {
       const message = inputEl.value.trim();
-      const hasImage = Boolean(attachedImageB64);
-      if ((!message && !hasImage) || sending) return;
+      const hasImages = currentImages.length > 0;
+      if ((!message && !hasImages) || sending) return;
 
       errorEl.textContent = '';
-      const imageB64 = attachedImageB64;
-      const imageMime = attachedImageMime;
-      const imageName = attachedImageName;
-      const currentImageDataUrl = hasImage ? `data:${imageMime || 'image/png'};base64,${imageB64}` : null;
-      const userText = hasImage ? (message || '[图片]') : message;
-      appendMessage('user', userText, currentImageDataUrl);
+      const images = currentImages.map((img) => ({ ...img }));
+      const currentImageDataUrls = images.map((img) => img.dataUrl);
+      const userText = hasImages ? (message || '[图片]') : message;
+      appendMessage('user', userText, currentImageDataUrls);
       const reqHistory = history.slice();
       inputEl.value = '';
-      clearAttachedImage();
+      clearAttachedImages();
       setLoading(true);
 
       try {
@@ -533,10 +587,9 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            message: message || '请分析这张截图并给出修复建议。',
+            message: message || '请结合这些截图分析问题并给出修复建议。',
             history: reqHistory,
-            image_b64: imageB64,
-            image_mime: imageMime
+            images: images.map((img) => ({ b64: img.b64, mime: img.mime }))
           })
         });
 
@@ -549,8 +602,8 @@
         history.push({
           role: 'user',
           content: userText,
-          imageDataUrl: currentImageDataUrl,
-          imageName: imageName || null
+          imageDataUrls: currentImageDataUrls,
+          imageNames: images.map((img) => img.name || null)
         });
         appendMessage('assistant', reply || '（空响应）');
         history.push({ role: 'assistant', content: reply || '（空响应）' });
@@ -565,7 +618,7 @@
     function clearChat() {
       history.length = 0;
       chatEl.innerHTML = '';
-      clearAttachedImage();
+      clearAttachedImages();
       appendMessage('assistant', '你好！把 Archicad 的编译报错或有问题的 GDL 代码粘进来，我帮你修。也可以直接粘贴截图或点击📎上传图片。');
       history.push({ role: 'assistant', content: '你好！把 Archicad 的编译报错或有问题的 GDL 代码粘进来，我帮你修。也可以直接粘贴截图或点击📎上传图片。' });
       errorEl.textContent = '';
@@ -575,25 +628,30 @@
     attachEl.addEventListener('click', () => imageInputEl.click());
     imageInputEl.addEventListener('change', async (e) => {
       try {
-        const file = e.target.files && e.target.files[0];
-        if (!file) return;
-        await setAttachedImageFromFile(file, file.name || '图片');
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+        await addImageFiles(files, '图片');
       } catch (err) {
         errorEl.textContent = `图片加载失败：${err.message || err}`;
-        clearAttachedImage();
+      } finally {
+        imageInputEl.value = '';
       }
     });
-    imageRemoveEl.addEventListener('click', clearAttachedImage);
     document.addEventListener('paste', async (e) => {
       try {
         const items = e.clipboardData && e.clipboardData.items;
         if (!items) return;
         for (const item of items) {
           if (item && item.type && item.type.startsWith('image/')) {
+            if (currentImages.length >= maxImages) {
+              errorEl.textContent = '最多只能附加 3 张图片。';
+              e.preventDefault();
+              break;
+            }
             const file = item.getAsFile();
             if (!file) continue;
             e.preventDefault();
-            await setAttachedImageFromFile(file, '粘贴截图');
+            await addImageFile(file, '粘贴截图');
             break;
           }
         }
