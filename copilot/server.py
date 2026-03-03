@@ -44,6 +44,8 @@ class HistoryMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     history: list[HistoryMessage] = Field(default_factory=list)
+    image_b64: str | None = None
+    image_mime: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -88,7 +90,25 @@ def index() -> HTMLResponse:
 def chat(req: ChatRequest) -> ChatResponse:
     llm = _create_llm_adapter()
     messages = _build_messages(req)
-    resp = llm.generate(messages)
+
+    has_image = bool(req.image_b64 and req.image_b64.strip())
+    if has_image:
+        flattened_parts: list[str] = []
+        for msg in messages[1:]:
+            role = msg.get("role", "user")
+            content = (msg.get("content") or "").strip()
+            if content:
+                flattened_parts.append(f"[{role}]\n{content}")
+
+        image_prompt = "\n\n".join(flattened_parts)
+        resp = llm.generate_with_image(
+            text_prompt=image_prompt,
+            image_b64=req.image_b64.strip(),
+            image_mime=(req.image_mime or "image/png"),
+            system_prompt=messages[0]["content"],
+        )
+    else:
+        resp = llm.generate(messages)
 
     reply = (resp.content or "").strip()
     code_blocks = _extract_gdl_code_blocks(reply)

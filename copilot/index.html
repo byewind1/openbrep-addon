@@ -160,6 +160,11 @@
       gap: 8px;
       align-items: end;
     }
+    .input-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
     textarea {
       width: 100%;
       height: 80px;
@@ -178,6 +183,22 @@
       box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.15);
     }
 
+    .attach-btn {
+      width: 40px;
+      height: 40px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .attach-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
     .send-btn {
       height: 40px;
       min-width: 92px;
@@ -189,9 +210,57 @@
       cursor: pointer;
       padding: 0 14px;
     }
-    .send-btn:disabled {
+    .send-btn:disabled,
+    .attach-btn:disabled {
       opacity: 0.65;
       cursor: not-allowed;
+    }
+
+    .image-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      padding: 8px;
+    }
+    .image-box.hidden {
+      display: none;
+    }
+    .image-preview {
+      width: 52px;
+      height: 52px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0b1220;
+      flex-shrink: 0;
+    }
+    .image-name {
+      flex: 1;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .image-remove {
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      border-radius: 8px;
+      width: 28px;
+      height: 28px;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .image-remove:hover {
+      color: var(--danger);
+      border-color: var(--danger);
     }
 
     .hint {
@@ -242,12 +311,21 @@
     <main id="chat" class="chat"></main>
 
     <footer class="composer">
-      <div class="input-row">
-        <textarea id="input" placeholder="粘贴报错信息或代码片段..."></textarea>
-        <button id="send" class="send-btn">发送</button>
+      <div id="imageBox" class="image-box hidden">
+        <img id="imagePreview" class="image-preview" alt="预览" />
+        <span id="imageName" class="image-name"></span>
+        <button id="imageRemove" class="image-remove" title="移除图片">✕</button>
       </div>
+      <div class="input-row">
+        <textarea id="input" placeholder="粘贴报错信息、代码片段，或直接粘贴截图..."></textarea>
+        <div class="input-actions">
+          <button id="attach" class="attach-btn" title="选择图片">📎</button>
+          <button id="send" class="send-btn">发送</button>
+        </div>
+      </div>
+      <input id="imageInput" type="file" accept="image/*" hidden />
       <div class="hint">
-        <span>Enter 发送，Shift+Enter 换行</span>
+        <span>Enter 发送，Shift+Enter 换行，Cmd+V 可粘贴截图</span>
         <span id="status"></span>
       </div>
       <div id="error" class="error"></div>
@@ -261,9 +339,18 @@
     const statusEl = document.getElementById('status');
     const errorEl = document.getElementById('error');
     const clearEl = document.getElementById('clear');
+    const attachEl = document.getElementById('attach');
+    const imageInputEl = document.getElementById('imageInput');
+    const imageBoxEl = document.getElementById('imageBox');
+    const imagePreviewEl = document.getElementById('imagePreview');
+    const imageNameEl = document.getElementById('imageName');
+    const imageRemoveEl = document.getElementById('imageRemove');
 
     const history = [];
     let sending = false;
+    let attachedImageB64 = null;
+    let attachedImageMime = null;
+    let attachedImageName = null;
 
     function escapeHtml(str) {
       return str
@@ -354,6 +441,8 @@
     function setLoading(on) {
       sending = on;
       sendEl.disabled = on;
+      attachEl.disabled = on;
+      imageRemoveEl.disabled = on;
       inputEl.disabled = on;
       if (on) {
         statusEl.innerHTML = '<span class="loading"><span class="dot"></span><span class="dot"></span><span class="dot"></span>发送中</span>';
@@ -362,21 +451,73 @@
       }
     }
 
+    function updateImagePreview() {
+      if (!attachedImageB64) {
+        imageBoxEl.classList.add('hidden');
+        imagePreviewEl.removeAttribute('src');
+        imageNameEl.textContent = '';
+        return;
+      }
+
+      imagePreviewEl.src = `data:${attachedImageMime || 'image/png'};base64,${attachedImageB64}`;
+      imageNameEl.textContent = attachedImageName || '截图';
+      imageBoxEl.classList.remove('hidden');
+    }
+
+    function clearAttachedImage() {
+      attachedImageB64 = null;
+      attachedImageMime = null;
+      attachedImageName = null;
+      imageInputEl.value = '';
+      updateImagePreview();
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || '');
+          const base64 = result.includes(',') ? result.split(',')[1] : '';
+          resolve(base64);
+        };
+        reader.onerror = () => reject(new Error('读取图片失败'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function setAttachedImageFromFile(file, fallbackName = '截图') {
+      if (!file || !file.type || !file.type.startsWith('image/')) return;
+      attachedImageB64 = await fileToBase64(file);
+      attachedImageMime = file.type || 'image/png';
+      attachedImageName = file.name || fallbackName;
+      updateImagePreview();
+    }
+
     async function sendMessage() {
       const message = inputEl.value.trim();
-      if (!message || sending) return;
+      const hasImage = Boolean(attachedImageB64);
+      if ((!message && !hasImage) || sending) return;
 
       errorEl.textContent = '';
-      appendMessage('user', message);
+      appendMessage('user', hasImage ? `${message || '(图片)'}\n[已附加图片：${attachedImageName || '截图'}]` : message);
       const reqHistory = history.slice();
+      const imageB64 = attachedImageB64;
+      const imageMime = attachedImageMime;
+      const imageName = attachedImageName;
       inputEl.value = '';
+      clearAttachedImage();
       setLoading(true);
 
       try {
         const res = await fetch('http://localhost:8502/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, history: reqHistory })
+          body: JSON.stringify({
+            message: message || '请分析这张截图并给出修复建议。',
+            history: reqHistory,
+            image_b64: imageB64,
+            image_mime: imageMime
+          })
         });
 
         if (!res.ok) {
@@ -385,7 +526,7 @@
 
         const data = await res.json();
         const reply = (data.reply || '').trim();
-        history.push({ role: 'user', content: message });
+        history.push({ role: 'user', content: hasImage ? `${message || '(图片)'}\n[已附加图片：${imageName || '截图'}]` : message });
         appendMessage('assistant', reply || '（空响应）');
         history.push({ role: 'assistant', content: reply || '（空响应）' });
       } catch (err) {
@@ -399,12 +540,42 @@
     function clearChat() {
       history.length = 0;
       chatEl.innerHTML = '';
-      appendMessage('assistant', '你好！把 Archicad 的编译报错或有问题的 GDL 代码粘进来，我帮你修。');
-      history.push({ role: 'assistant', content: '你好！把 Archicad 的编译报错或有问题的 GDL 代码粘进来，我帮你修。' });
+      clearAttachedImage();
+      appendMessage('assistant', '你好！把 Archicad 的编译报错或有问题的 GDL 代码粘进来，我帮你修。也可以直接粘贴截图或点击📎上传图片。');
+      history.push({ role: 'assistant', content: '你好！把 Archicad 的编译报错或有问题的 GDL 代码粘进来，我帮你修。也可以直接粘贴截图或点击📎上传图片。' });
       errorEl.textContent = '';
       inputEl.focus();
     }
 
+    attachEl.addEventListener('click', () => imageInputEl.click());
+    imageInputEl.addEventListener('change', async (e) => {
+      try {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        await setAttachedImageFromFile(file, file.name || '图片');
+      } catch (err) {
+        errorEl.textContent = `图片加载失败：${err.message || err}`;
+        clearAttachedImage();
+      }
+    });
+    imageRemoveEl.addEventListener('click', clearAttachedImage);
+    document.addEventListener('paste', async (e) => {
+      try {
+        const items = e.clipboardData && e.clipboardData.items;
+        if (!items) return;
+        for (const item of items) {
+          if (item && item.type && item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (!file) continue;
+            e.preventDefault();
+            await setAttachedImageFromFile(file, '粘贴截图');
+            break;
+          }
+        }
+      } catch (err) {
+        errorEl.textContent = `粘贴图片失败：${err.message || err}`;
+      }
+    });
     clearEl.addEventListener('click', clearChat);
     sendEl.addEventListener('click', sendMessage);
     inputEl.addEventListener('keydown', (e) => {
@@ -414,8 +585,9 @@
       }
     });
 
-    appendMessage('assistant', '你好！把 Archicad 的编译报错或有问题的 GDL 代码粘进来，我帮你修。');
-    history.push({ role: 'assistant', content: '你好！把 Archicad 的编译报错或有问题的 GDL 代码粘进来，我帮你修。' });
+    appendMessage('assistant', '你好！把 Archicad 的编译报错或有问题的 GDL 代码粘进来，我帮你修。也可以直接粘贴截图或点击📎上传图片。');
+    history.push({ role: 'assistant', content: '你好！把 Archicad 的编译报错或有问题的 GDL 代码粘进来，我帮你修。也可以直接粘贴截图或点击📎上传图片。' });
+    updateImagePreview();
     inputEl.focus();
   </script>
 </body>
