@@ -85,6 +85,7 @@ void CopilotPalette::DestroyInstance ()
 void CopilotPalette::Show ()
 {
 	DG::Palette::Show ();
+	BringToFront ();
 }
 
 void CopilotPalette::Hide ()
@@ -147,6 +148,10 @@ GSErrCode CopilotPalette::PaletteControlCallBack (Int32, API_PaletteMessageID me
 
 		case APIPalMsg_IsPaletteVisible:
 			*(reinterpret_cast<bool*> (param)) = HasInstance () && Instance ().IsVisible ();
+			break;
+
+		case APIPalMsg_GetPaletteDeactivationMethod:
+			*(reinterpret_cast<API_PaletteDeactivationMethod*> (param)) = APIPaletteDeactivationMethod_DisableItems;
 			break;
 
 		default:
