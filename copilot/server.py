@@ -44,10 +44,16 @@ SYSTEM_PROMPT = """你是 Archicad GDL 脚本 AI 修复助手。
 3. 代码用 ```gdl ``` 包裹
 不废话，建筑师只要能跑的代码。若信息不足主动追问。"""
 
+ERROR_SUMMARY_SYSTEM_PROMPT = "你是 GDL 错误分析助手，把以下编译错误列表总结成一句简洁的中文描述，只说错误位置和原因，不给修复建议。"
+ERROR_CLIPBOARD_PATTERN = re.compile(r"(line|\.gsm|\.gdl|error|warning|错误|警告)", re.IGNORECASE)
+
 clipboard_lock = threading.Lock()
 clipboard_buffer: list[str] = []
 clipboard_last_signature = ""
-clipboard_last_nonempty = ""
+
+
+def _is_error_clipboard_text(value: str) -> bool:
+    return bool(ERROR_CLIPBOARD_PATTERN.search(value))
 
 
 def _read_clipboard_text_pbpaste() -> str:
@@ -84,7 +90,7 @@ def _read_clipboard_snapshot() -> tuple[str, str]:
 
 
 def _clipboard_watch_loop() -> None:
-    global clipboard_last_signature, clipboard_last_nonempty
+    global clipboard_last_signature
 
     while True:
         value, source = _read_clipboard_snapshot()
@@ -92,10 +98,10 @@ def _clipboard_watch_loop() -> None:
             signature = f"{source}:{value}"
             if signature != clipboard_last_signature:
                 clipboard_last_signature = signature
-                if value != clipboard_last_nonempty:
-                    clipboard_last_nonempty = value
+                if _is_error_clipboard_text(value):
                     with clipboard_lock:
-                        clipboard_buffer.append(value)
+                        if value not in clipboard_buffer:
+                            clipboard_buffer.append(value)
         time.sleep(0.8)
 
 
@@ -129,6 +135,10 @@ class ClipboardBufferResponse(BaseModel):
 
 class ClipboardBufferUpdateRequest(BaseModel):
     items: list[str] = Field(default_factory=list)
+
+
+class ErrorSummaryResponse(BaseModel):
+    summary: str
 
 
 def _extract_gdl_code_blocks(text: str) -> list[str]:
@@ -184,15 +194,45 @@ def get_clipboard_buffer() -> ClipboardBufferResponse:
 
 @app.post("/clipboard-buffer/clear", response_model=ClipboardBufferResponse)
 def clear_clipboard_buffer(req: ClipboardBufferUpdateRequest | None = None) -> ClipboardBufferResponse:
-    global clipboard_last_nonempty
-
     items = req.items if req is not None else []
-    normalized = [item.strip() for item in items if item and item.strip()]
+    normalized = [item.strip() for item in items if item and item.strip() and _is_error_clipboard_text(item)]
     with clipboard_lock:
         clipboard_buffer.clear()
         clipboard_buffer.extend(normalized)
-        clipboard_last_nonempty = normalized[-1] if normalized else ""
         return ClipboardBufferResponse(items=list(clipboard_buffer))
+
+
+@app.post("/summarize-errors", response_model=ErrorSummaryResponse)
+def summarize_errors() -> ErrorSummaryResponse:
+    with clipboard_lock:
+        errors = list(clipboard_buffer)
+        clipboard_buffer.clear()
+
+    if not errors:
+        return ErrorSummaryResponse(summary="")
+
+    llm = _create_llm_adapter()
+    merged = "\n\n".join(f"[{idx + 1}] {item}" for idx, item in enumerate(errors))
+    messages = [
+        {"role": "system", "content": ERROR_SUMMARY_SYSTEM_PROMPT},
+        {"role": "user", "content": merged},
+    ]
+
+    try:
+        resp = llm.generate(messages)
+        summary = (resp.content or "").strip()
+    except Exception:
+        summary = ""
+
+    if not summary:
+        summary = "；".join(errors[:2])
+        if len(summary) > 100:
+            summary = summary[:100]
+
+    if len(summary) > 100:
+        summary = summary[:100]
+
+    return ErrorSummaryResponse(summary=summary)
 
 
 @app.post("/chat", response_model=ChatResponse)

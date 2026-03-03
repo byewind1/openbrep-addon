@@ -418,6 +418,7 @@
           <div id="clipboardList" class="collector-list"></div>
           <div class="collector-actions">
             <button id="clipboardClear" class="collector-btn" title="清空收集区">清空</button>
+            <button id="clipboardSummarize" class="collector-btn" title="总结错误">✨ 总结错误</button>
             <button id="clipboardSend" class="collector-btn" title="发送全部错误">全部发送</button>
           </div>
         </div>
@@ -457,6 +458,7 @@
     const clipboardListEl = document.getElementById('clipboardList');
     const clipboardSendEl = document.getElementById('clipboardSend');
     const clipboardClearEl = document.getElementById('clipboardClear');
+    const clipboardSummarizeEl = document.getElementById('clipboardSummarize');
 
     const history = [];
     let sending = false;
@@ -465,6 +467,7 @@
     let clipboardItems = [];
     let clipboardExpanded = false;
     let clipboardPolling = false;
+    let summarizingClipboard = false;
     let lastClipboardCount = 0;
 
     function escapeHtml(str) {
@@ -757,8 +760,10 @@
         clipboardListEl.appendChild(row);
       }
 
-      clipboardSendEl.disabled = count === 0 || sending;
-      clipboardClearEl.disabled = count === 0 || sending;
+      clipboardSendEl.disabled = count === 0 || sending || summarizingClipboard;
+      clipboardClearEl.disabled = count === 0 || sending || summarizingClipboard;
+      clipboardSummarizeEl.disabled = count === 0 || sending || summarizingClipboard;
+      clipboardSummarizeEl.textContent = summarizingClipboard ? '总结中...' : '✨ 总结错误';
     }
 
     async function syncClipboardBuffer() {
@@ -784,8 +789,37 @@
       }
     }
 
+    async function summarizeClipboardErrors() {
+      if (clipboardItems.length === 0 || sending || summarizingClipboard) return;
+      summarizingClipboard = true;
+      renderClipboardCollector();
+      try {
+        const res = await fetch('http://localhost:8502/summarize-errors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        const summary = String(data.summary || '').trim();
+        if (summary) {
+          inputEl.value = inputEl.value.trim() ? `${summary}\n${inputEl.value}` : summary;
+        }
+        clipboardItems = [];
+        clipboardExpanded = false;
+        renderClipboardCollector();
+        inputEl.focus();
+      } catch (err) {
+        errorEl.textContent = `错误总结失败：${err.message || err}`;
+      } finally {
+        summarizingClipboard = false;
+        renderClipboardCollector();
+      }
+    }
+
     async function sendClipboardBatch() {
-      if (clipboardItems.length === 0 || sending) return;
+      if (clipboardItems.length === 0 || sending || summarizingClipboard) return;
       const joined = clipboardItems.map((item, idx) => `【错误 ${idx + 1}】\n${item}`).join('\n\n');
       await sendMessage(joined);
       clipboardItems = [];
@@ -843,6 +877,7 @@
       renderClipboardCollector();
     });
     clipboardSendEl.addEventListener('click', sendClipboardBatch);
+    clipboardSummarizeEl.addEventListener('click', summarizeClipboardErrors);
     clipboardClearEl.addEventListener('click', async () => {
       clipboardItems = [];
       await syncClipboardBuffer();
