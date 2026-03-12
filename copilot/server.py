@@ -14,7 +14,7 @@ except Exception:
     NSPasteboard = None  # type: ignore[assignment]
     NSStringPboardType = None  # type: ignore[assignment]
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -239,7 +239,13 @@ def summarize_errors() -> ErrorSummaryResponse:
 def chat(req: ChatRequest) -> ChatResponse:
     llm = _create_llm_adapter()
     messages = _build_messages(req)
-    resp = llm.generate(messages)
+    try:
+        resp = llm.generate(messages)
+    except RuntimeError as exc:
+        message = str(exc)
+        if message.startswith("LLM 配置错误："):
+            raise HTTPException(status_code=400, detail=message) from exc
+        raise
 
     reply = (resp.content or "").strip()
     code_blocks = _extract_gdl_code_blocks(reply)

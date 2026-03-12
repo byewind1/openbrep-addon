@@ -705,7 +705,9 @@
         });
 
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+          const errBody = await res.json().catch(() => ({}));
+          const detail = errBody.detail || errBody.message || '';
+          throw new Error(detail || `HTTP ${res.status}`);
         }
 
         const data = await res.json();
