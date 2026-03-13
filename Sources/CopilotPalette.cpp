@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
+#include <string>
 #include <thread>
 
 #include <arpa/inet.h>
@@ -16,7 +18,21 @@ constexpr short MinPaletteClientWidth = 320;
 constexpr short MinPaletteClientHeight = 400;
 constexpr UInt16 CopilotServerPort = 8502;
 constexpr const char* CopilotServerUrl = "http://localhost:8502";
-constexpr const char* CopilotServerCommand = "/bin/bash -c 'cd /Users/ren/MAC工作/工作/code/开源项目/openbrep-addon && nohup /Users/ren/miniconda3/bin/python -m uvicorn copilot.server:app --port 8502 > /tmp/copilot.log 2>&1 &'";
+constexpr const char* CopilotServerCommand = "/bin/bash /tmp/start_copilot.sh";
+constexpr const char* CopilotDebugLogPath = "/tmp/copilot_debug.log";
+
+static void AppendCopilotDebugLog (const GS::UniString& message)
+{
+	std::ofstream logFile (CopilotDebugLogPath, std::ios::out | std::ios::app);
+	if (!logFile.is_open ())
+		return;
+	logFile << message.ToCStr ().Get () << "\n";
+}
+
+static GS::UniString FormatDebugMessage (const char* prefix, bool isRunning)
+{
+	return GS::UniString (prefix) + (isRunning ? "true" : "false");
+}
 
 static bool IsCopilotServerRunning ()
 {
@@ -36,14 +52,19 @@ static bool IsCopilotServerRunning ()
 
 static void EnsureCopilotServerRunning ()
 {
-	if (IsCopilotServerRunning ())
+	const bool runningBefore = IsCopilotServerRunning ();
+	AppendCopilotDebugLog (FormatDebugMessage ("EnsureCopilotServerRunning: before=", runningBefore));
+	if (runningBefore)
 		return;
 
+	AppendCopilotDebugLog ("EnsureCopilotServerRunning: launching /tmp/start_copilot.sh");
 	std::system (CopilotServerCommand);
 
 	for (int attempt = 0; attempt < 8; ++attempt) {
 		std::this_thread::sleep_for (std::chrono::milliseconds (250));
-		if (IsCopilotServerRunning ())
+		const bool running = IsCopilotServerRunning ();
+		AppendCopilotDebugLog (FormatDebugMessage ("EnsureCopilotServerRunning: poll=", running));
+		if (running)
 			break;
 	}
 }

@@ -19,6 +19,9 @@ ZIP_NAME="OpenBrep-v${VERSION}-AC29.zip"
 
 cmake --build build -j"$(sysctl -n hw.logicalcpu)"
 
+cp -f start_copilot.sh /tmp/start_copilot.sh
+chmod +x /tmp/start_copilot.sh
+
 rm -rf '/Applications/GRAPHISOFT/Archicad 29/Add-Ons/OpenBrep.bundle'
 cp -r build/OpenBrep.bundle '/Applications/GRAPHISOFT/Archicad 29/Add-Ons/'
 
